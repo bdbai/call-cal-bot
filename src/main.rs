@@ -64,12 +64,7 @@ fn build_daily_report(ctx: &mut BotContext<'_>) -> String {
         let nickname: String = row.get(0)?;
         let created_at: Option<String> = row.get(1)?;
         let has_record = created_at.is_some();
-        let row_text = if has_record {
-            nickname + " ✅"
-        } else {
-            nickname + " ❌"
-        };
-        Ok((row_text, has_record))
+        Ok((nickname, has_record))
     }) {
         Ok(rows) => rows,
         Err(e) => {
@@ -85,21 +80,28 @@ fn build_daily_report(ctx: &mut BotContext<'_>) -> String {
             return "打卡日报查询失败".to_string();
         }
     };
-    if rows.is_empty() {
+
+    let (rows_has_record, rows_wo_record): (Vec<_>, _) =
+        rows.into_iter().partition(|(_, has_record)| *has_record);
+    if rows_has_record.is_empty() {
         return "今日无人打卡".to_string();
     }
 
-    rows.sort_by_key(|(_, has_record)| !has_record);
-    let mut report = rows
+    let rows_has_record = rows_has_record
         .into_iter()
         .map(|(row_text, _)| row_text)
         .collect::<Vec<_>>()
-        .join("\n");
-    report.insert_str(
-        0,
-        &format!("{}/{}\n", checkpoint_start.month(), checkpoint_start.day()),
-    );
-    report
+        .join("\u{3000}");
+    let rows_wo_record = rows_wo_record
+        .into_iter()
+        .map(|(row_text, _)| row_text)
+        .collect::<Vec<_>>()
+        .join("\u{3000}");
+    format!(
+        "{}/{}\n{rows_has_record} ✅\n{rows_wo_record} ❌",
+        checkpoint_start.month(),
+        checkpoint_start.day()
+    )
 }
 
 fn handle_我没打卡(
