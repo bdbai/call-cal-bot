@@ -25,9 +25,6 @@ pub fn init_db(conn: &mut Connection) {
     migrations::runner().run(conn).expect("db migration");
 }
 
-fn get_checkpoint_timestamp() -> i64 {
-    get_checkpoint().timestamp()
-}
 /// Get the datetime at 4 AM of the current day if the current time is after 4 AM,
 /// otherwise get the datetime at 4 AM of the previous day. Use UTC+8 time zone.
 fn get_checkpoint() -> DateTime<FixedOffset> {
@@ -60,12 +57,15 @@ fn build_daily_report(ctx: &mut BotContext<'_>) -> String {
         )
         .expect("Prepare statement failed");
 
-    let rows = match stmt.query_map(params![checkpoint_start, checkpoint_end], |row| {
-        let nickname: String = row.get(0)?;
-        let created_at: Option<String> = row.get(1)?;
-        let has_record = created_at.is_some();
-        Ok((nickname, has_record))
-    }) {
+    let rows = match stmt.query_map(
+        params![checkpoint_start.naive_utc(), checkpoint_end.naive_utc()],
+        |row| {
+            let nickname: String = row.get(0)?;
+            let created_at: Option<String> = row.get(1)?;
+            let has_record = created_at.is_some();
+            Ok((nickname, has_record))
+        },
+    ) {
         Ok(rows) => rows,
         Err(e) => {
             error!("Failed to query daily report: {:?}", e);
@@ -73,7 +73,7 @@ fn build_daily_report(ctx: &mut BotContext<'_>) -> String {
         }
     };
     let rows: Result<Vec<_>, _> = rows.collect();
-    let mut rows = match rows {
+    let rows = match rows {
         Ok(rows) => rows,
         Err(e) => {
             error!("Failed to collect daily report rows: {:?}", e);
@@ -88,13 +88,13 @@ fn build_daily_report(ctx: &mut BotContext<'_>) -> String {
     }
 
     let rows_has_record = rows_has_record
-        .into_iter()
-        .map(|(row_text, _)| row_text)
+        .iter()
+        .map(|(row_text, _)| &**row_text)
         .collect::<Vec<_>>()
         .join("\u{3000}");
     let rows_wo_record = rows_wo_record
-        .into_iter()
-        .map(|(row_text, _)| row_text)
+        .iter()
+        .map(|(row_text, _)| &**row_text)
         .collect::<Vec<_>>()
         .join("\u{3000}");
     format!(
@@ -116,7 +116,7 @@ fn handle_我没打卡(
     let group_nickname = group_member_info.member_card.as_deref().unwrap_or(nickname);
 
     debug!("Handling 我没打卡 command for user {}", uin);
-    let checkpoint = get_checkpoint_timestamp();
+    let checkpoint = get_checkpoint();
 
     // TODO: refactor
     const UPSERT_RECORD_SQL: &str =
@@ -150,7 +150,7 @@ fn handle_我没打卡(
         .prepare_cached("DELETE FROM `bot_daka` WHERE `user_id` = ?1 AND `created_at` >= ?2")
         .expect("Prepare statement failed");
 
-    let res = 我没打卡_stmt.execute(params![user_id, checkpoint]);
+    let res = 我没打卡_stmt.execute(params![user_id, checkpoint.naive_utc()]);
     drop(我没打卡_stmt);
     let msg = match res {
         Ok(0) => "确实",
@@ -186,7 +186,7 @@ fn handle_打卡(
     let group_nickname = group_member_info.member_card.as_deref().unwrap_or(nickname);
 
     debug!("Handling 打卡 command for user {}", uin);
-    let checkpoint = get_checkpoint_timestamp();
+    let checkpoint = get_checkpoint();
 
     const UPSERT_RECORD_SQL: &str =
         "INSERT INTO `bot_group_member` (`qq_uid`, `qq_uin`, `nickname`, `group_nickname`)
@@ -223,7 +223,7 @@ fn handle_打卡(
         )
         .expect("Prepare statement failed");
 
-    let res = 打卡_stmt.execute(params![user_id, checkpoint]);
+    let res = 打卡_stmt.execute(params![user_id, checkpoint.naive_utc()]);
     drop(打卡_stmt);
     let mut _daily_report = String::new();
     let msg = match res {
@@ -249,6 +249,109 @@ fn handle_打卡(
             uin,
         }),
     );
+    Some(chain)
+}
+
+fn handle_咕(
+    ctx: &mut BotContext<'_>,
+    group_uin: u32,
+    group_member_info: &BotGroupMember,
+    _args: &str,
+) -> Option<MessageChain> {
+    let uin = group_member_info.uin;
+
+    debug!("Handling 咕 command for user {}", uin);
+    let checkpoint_end = get_checkpoint();
+    let checkpoint_start = checkpoint_end - chrono::Duration::days(10);
+
+    let mut get_records_10day_stmt = ctx
+        .conn
+        .prepare_cached(
+            "SELECT
+                `bot_group_member`.`group_nickname`,
+                (
+                    SELECT `created_at` FROM `bot_daka`
+                    WHERE `bot_daka`.`user_id` = `bot_group_member`.`id`
+                    AND `bot_daka`.`created_at` >= ?1 AND `bot_daka`.`created_at` < ?2
+                    ORDER BY `bot_daka`.`id` DESC LIMIT 1
+                ) AS `last_daka_at`
+            FROM `bot_group_member`
+            ORDER BY `bot_group_member`.`sort_key` ASC, `bot_group_member`.`id` ASC",
+        )
+        .expect("Prepare statement failed");
+
+    #[derive(Debug, Clone)]
+    struct DakaRecord {
+        group_nickname: String,
+        last_daka_at: Option<DateTime<FixedOffset>>,
+    }
+    let res = get_records_10day_stmt
+        .query_map(
+            params![checkpoint_start.naive_utc(), checkpoint_end.naive_utc()],
+            |row| {
+                let group_nickname: String = row.get(0)?;
+                let created_at: Option<DateTime<Utc>> = row.get(1)?;
+                Ok(DakaRecord {
+                    group_nickname,
+                    last_daka_at: created_at.map(|dt| dt.with_timezone(&BOT_TZ)),
+                })
+            },
+        )
+        .and_then(|rows| rows.collect::<Result<Vec<_>, _>>());
+    drop(get_records_10day_stmt);
+
+    let records = match res {
+        Ok(rows) => rows,
+        Err(e) => {
+            error!("Failed to query records: {:?}", e);
+            return Some(
+                MessageChainBuilder::group(group_uin)
+                    .text("咕咕查询失败：数据库错误")
+                    .build(),
+            );
+        }
+    };
+
+    let failed_group_members = records
+        .iter()
+        .filter(|record| {
+            if let Some(last_daka_at) = record.last_daka_at {
+                last_daka_at < checkpoint_start
+            } else {
+                true
+            }
+        })
+        .map(|record| &*record.group_nickname)
+        .collect::<Vec<_>>();
+    let failed_msg = if failed_group_members.is_empty() {
+        "".into()
+    } else {
+        format!("💢 10天没打卡：\n{}", failed_group_members.join("\u{3000}"))
+    };
+
+    let warning_checkpoint = checkpoint_end - chrono::Duration::days(7);
+    let warning_group_members = records
+        .iter()
+        .filter_map(|record| {
+            (record.last_daka_at? < warning_checkpoint).then_some(&*record.group_nickname)
+        })
+        .collect::<Vec<_>>();
+    let warning_msg = if warning_group_members.is_empty() {
+        "".into()
+    } else {
+        format!("⚠️ 7天没打卡：\n{}", warning_group_members.join("\u{3000}"))
+    };
+
+    let msg = if failed_msg.is_empty() && warning_msg.is_empty() {
+        "没有人咕咕".to_string()
+    } else {
+        format!("{}\n{}", failed_msg, warning_msg)
+    };
+
+    let chain = MessageChainBuilder::group(group_uin)
+        .text(" ")
+        .text(msg.trim())
+        .build();
     Some(chain)
 }
 
@@ -281,7 +384,7 @@ fn handle_group_msg(ctx: &mut BotContext<'_>, ev: &GroupMessageEvent) -> Option<
             let report = build_daily_report(ctx);
             Some(MessageChainBuilder::group(*group_uin).text(&report).build())
         }
-        "/打卡改名" => todo!(),
+        "/咕" => handle_咕(ctx, *group_uin, group_member_info, args),
         _ => return None,
     }
 }
