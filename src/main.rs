@@ -1,4 +1,5 @@
 use std::fs;
+use std::io::Cursor;
 
 use chrono::prelude::*;
 use mania::entity::bot_group_member::BotGroupMember;
@@ -355,6 +356,15 @@ fn handle_咕(
     Some(chain)
 }
 
+fn handle_test_img(ctx: &mut BotContext<'_>, group_uin: u32) -> Option<MessageChain> {
+    static PNG_DATA: &[u8] = include_bytes!("../9.png");
+    Some(
+        MessageChainBuilder::group(group_uin)
+            .image_stream(Cursor::new(PNG_DATA), PNG_DATA.len() as u32)
+            .build(),
+    )
+}
+
 fn handle_group_msg(ctx: &mut BotContext<'_>, ev: &GroupMessageEvent) -> Option<MessageChain> {
     let MessageType::Group(GroupMessageUniqueElem {
         group_uin,
@@ -385,6 +395,7 @@ fn handle_group_msg(ctx: &mut BotContext<'_>, ev: &GroupMessageEvent) -> Option<
             Some(MessageChainBuilder::group(*group_uin).text(&report).build())
         }
         "/咕" => handle_咕(ctx, *group_uin, group_member_info, args),
+        "/test_img" => handle_test_img(ctx, *group_uin),
         _ => return None,
     }
 }

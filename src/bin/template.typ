@@ -1,0 +1,5 @@
+#set page(width: 8cm, height: 8cm, margin: 0pt)
+#set text(size: .5cm)
+#text("Hello, World!", size: 4em)
+#text("Hello, World!", size: 1em)
+#text("Hello, World!", size: 1em)

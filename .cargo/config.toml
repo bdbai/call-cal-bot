@@ -1,0 +1,3 @@
+# Enable all sse features plus avx only for x86_64 targets
+[target.'cfg(target_arch = "x86_64")']
+rustflags = ["-C", "target-feature=+sse,+sse2,+ssse3,+sse4.1,+sse4.2,+pclmulqdq,+avx"]
