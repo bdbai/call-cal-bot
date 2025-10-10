@@ -1,0 +1,147 @@
+use std::fs;
+
+use mania::entity::bot_group_member::BotGroupMember;
+use mania::event::group::GroupEvent;
+use mania::event::group::group_message::GroupMessageEvent;
+use mania::message::builder::MessageChainBuilder;
+use mania::message::chain::{GroupMessageUniqueElem, MessageChain, MessageType};
+use mania::message::entity::{Entity, Mention};
+use mania::{Client, ClientConfig, DeviceInfo, KeyStore};
+use tracing::{debug, error};
+
+use crate::service::{BotContext, Service};
+
+fn handle_group_msg(ctx: &mut BotContext<'_>, ev: &GroupMessageEvent) -> Option<MessageChain> {
+    let MessageType::Group(GroupMessageUniqueElem {
+        group_uin,
+        group_member_info: Some(group_member_info),
+    }) = &ev.chain.typ
+    else {
+        return None;
+    };
+    debug!("group_member_info: {:?}", group_member_info);
+
+    let text_entities = ev.chain.entities.iter().filter_map(|e| {
+        if let Entity::Text(te) = e {
+            Some(te.text.trim())
+        } else {
+            None
+        }
+    });
+    let first_text = text_entities
+        .filter(|te| !te.is_empty())
+        .next()
+        .unwrap_or_default();
+    let (command, args) = first_text.split_once(' ').unwrap_or((first_text, ""));
+    match command {
+        "/打卡" => handle_打卡(ctx, *group_uin, group_member_info, args),
+        "/我没打卡" => handle_我没打卡(ctx, *group_uin, group_member_info, args),
+        "/今日" => {
+            let report = build_daily_report(ctx);
+            Some(MessageChainBuilder::group(*group_uin).text(&report).build())
+        }
+        "/咕" => handle_咕(ctx, *group_uin, group_member_info, args),
+        _ => return None,
+    }
+}
+
+pub async fn run(svc: Service) {
+    let config = ClientConfig::default();
+    let device = DeviceInfo::load("device.json").unwrap_or_else(|_| {
+        tracing::warn!("Failed to load device info, generating a new one...");
+        let device = DeviceInfo::default();
+        device.save("device.json").unwrap();
+        device
+    });
+    let key_store = KeyStore::load("keystore.json").unwrap_or_else(|_| {
+        tracing::warn!("Failed to load keystore, generating a new one...");
+        let key_store = KeyStore::default();
+        key_store.save("keystore.json").unwrap();
+        key_store
+    });
+    let need_login = key_store.is_expired();
+    let mut client = Client::new(config, device, key_store).await.unwrap();
+
+    let op = client.handle().operator().clone();
+    let send_op = client.handle().operator().clone();
+    let mut group_receiver = op.event_listener.group.clone();
+    let mut system_receiver = op.event_listener.system.clone();
+
+    tokio::spawn(async move {
+        loop {
+            let mut reply = None;
+            tokio::select! {
+                _ = system_receiver.changed() => {
+                    if let Some(ref se) = *system_receiver.borrow() {
+                        tracing::info!("[SystemEvent] {:?}", se);
+                    }
+                }
+                _ = group_receiver.changed() => {
+                    let guard = group_receiver.borrow();
+                    if let Some(ref ge) = *guard {
+                        tracing::debug!("[GroupEvent] {:?}", ge);
+                        match ge {
+                            GroupEvent::GroupMessage(gme) => {
+                                if let mania::message::chain::MessageType::Group(_gmeu) = &gme.chain.typ {
+                                    reply = handle_group_msg(&mut svc, gme);
+                                }
+                            }
+                            _ => {},
+                        }
+                    }
+                }
+            }
+            if let Some(chain) = reply {
+                tracing::debug!("Replying with message chain: {:?}", chain);
+                if let Err(e) = send_op.send_message(chain).await {
+                    tracing::error!("Failed to send message: {:?}", e);
+                }
+            }
+        }
+    });
+
+    tokio::spawn(async move {
+        client.spawn().await;
+    });
+
+    if need_login {
+        tracing::warn!("Session is invalid, need to login again!");
+        let login_res: Result<(), String> = async {
+            let (url, bytes) = op.fetch_qrcode().await.map_err(|e| e.to_string())?;
+            let qr_code_name = format!("qrcode.png");
+            fs::write(&qr_code_name, &bytes).map_err(|e| e.to_string())?;
+            tracing::info!(
+                "QR code fetched successfully! url: {}, saved to {}",
+                url,
+                qr_code_name
+            );
+            let login_res = op.login_by_qrcode().await.map_err(|e| e.to_string());
+            match fs::remove_file(&qr_code_name).map_err(|e| e.to_string()) {
+                Ok(_) => tracing::info!("QR code file {} deleted successfully", qr_code_name),
+                Err(e) => tracing::error!("Failed to delete QR code file {}: {}", qr_code_name, e),
+            }
+            login_res
+        }
+        .await;
+        if let Err(e) = login_res {
+            panic!("Failed to login: {e:?}");
+        }
+    } else {
+        tracing::info!("Session is still valid, trying to online...");
+    }
+
+    let _tx = match op.online().await {
+        Ok(tx) => tx,
+        Err(e) => {
+            tracing::error!("Failed to set online status: {e:?}");
+            return;
+        }
+    };
+    tracing::info!("Bot online");
+
+    op.update_key_store()
+        .save("keystore.json")
+        .unwrap_or_else(|e| tracing::error!("Failed to save key store: {:?}", e));
+
+    tokio::signal::ctrl_c().await.unwrap();
+}

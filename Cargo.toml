@@ -20,3 +20,5 @@ regex = "1"
 rusqlite = { version = "0.33", features = ["modern-full"] }
 refinery = { version = "0.8", features = ["rusqlite"] }
 chrono = { version = "0.4", default-features = false, features = ["now"] }
+
+axum = "0.8"
