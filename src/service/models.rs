@@ -1,5 +1,3 @@
-use chrono::prelude::*;
-
 /// Internal business model for a group member. Handlers convert mania's
 /// `BotGroupMember` into this struct before calling service methods.
 #[derive(Debug, Clone)]

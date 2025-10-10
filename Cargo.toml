@@ -22,3 +22,9 @@ refinery = { version = "0.8", features = ["rusqlite"] }
 chrono = { version = "0.4", default-features = false, features = ["now"] }
 
 axum = "0.8"
+argon2 = "0.5"
+jsonwebtoken = "8"
+rand = "0.8"
+headers = "0.4"
+hyper = { version = "0.14", features = ["server"] }
+async-trait = "0.1"

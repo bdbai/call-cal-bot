@@ -207,7 +207,7 @@ pub async fn run(svc: Service) {
         }
         .await;
         if let Err(e) = login_res {
-            panic!("Failed to login: {e:?}");
+            tracing::error!("Failed to login: {e:?}");
         }
     } else {
         tracing::info!("Session is still valid, trying to online...");
