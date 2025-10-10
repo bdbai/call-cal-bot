@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>打卡小程序</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <main id="app">
+    <header>
+      <div id="date">--</div>
+      <div id="nav">
+        <button id="prev">◀</button>
+        <button id="next">▶</button>
+      </div>
+    </header>
+
+    <section id="records">
+      <ul id="list"></ul>
+    </section>
+
+    <footer>
+      <div id="actions">
+        <button id="daka">打卡</button>
+        <button id="undo">我没打卡</button>
+      </div>
+    </footer>
+  </main>
+
+  <div id="auth" class="modal hidden">
+    <div class="panel">
+      <h3>登录</h3>
+      <input id="uin" placeholder="QQ UIN" type="number" />
+      <input id="password" placeholder="Password" type="password" />
+      <button id="login">登录</button>
+    </div>
+  </div>
+
+  <div id="reset" class="modal hidden">
+    <div class="panel">
+      <h3>设置新密码</h3>
+      <input id="newpass" placeholder="New password" type="password" />
+      <button id="setpass">设置</button>
+    </div>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

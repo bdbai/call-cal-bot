@@ -96,6 +96,59 @@ impl super::Service {
         )
     }
 
+    /// Query records for a specific checkpoint start (UTC+8 04:00 of the provided date).
+    /// If `date_str` is None, uses get_checkpoint() (today by bot rules).
+    /// Returns a Vec of (nickname, Option<HH:MM string>) where None means no record.
+    pub fn query_records_for_date(&self, date_str: Option<&str>) -> Result<Vec<(String, Option<String>)>, String> {
+        let checkpoint_start = match date_str {
+            Some(s) => match chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d") {
+                Ok(d) => BOT_TZ
+                    .from_local_datetime(&NaiveDateTime::new(d, BOT_CHECKPOINT))
+                    .single()
+                    .ok_or_else(|| "invalid date/time".to_string())?,
+                Err(e) => return Err(format!("invalid date: {:?}", e)),
+            },
+            None => get_checkpoint(),
+        };
+
+        let checkpoint_end = checkpoint_start + chrono::Duration::days(1);
+
+        let conn_guard = self.conn.lock().unwrap();
+        // Order by presence of created_at (not null first) then by created_at asc, then by sort_key and id
+        let mut stmt = conn_guard.prepare_cached(
+            "SELECT `bot_group_member`.`group_nickname`, D.`created_at` FROM `bot_group_member`
+            LEFT JOIN (
+                SELECT `created_at`, `user_id` FROM `bot_daka` WHERE `bot_daka`.`created_at` >= ?1 AND `bot_daka`.`created_at` < ?2
+            ) D ON D.`user_id` = `bot_group_member`.`id`
+            ORDER BY (D.`created_at` IS NULL), D.`created_at` ASC, `bot_group_member`.`sort_key` ASC, `bot_group_member`.`id` ASC",
+        )
+        .map_err(|e| format!("prepare failed: {:?}", e))?;
+
+        let rows = stmt
+            .query_map(
+                params![checkpoint_start.naive_utc(), checkpoint_end.naive_utc()],
+                |row| {
+                    let nickname: String = row.get(0)?;
+                    // read as UTC datetime and convert to BOT_TZ when present
+                    let created_at: Option<chrono::DateTime<chrono::Utc>> = row.get(1)?;
+                    let time_str = created_at.map(|dt| dt.with_timezone(&BOT_TZ).format("%H:%M").to_string());
+                    Ok((nickname, time_str))
+                },
+            )
+            .map_err(|e| format!("query failed: {:?}", e))?;
+
+        let mut out: Vec<(String, Option<String>)> = Vec::new();
+        for r in rows {
+            match r {
+                Ok((n, t)) => out.push((n, t)),
+                Err(e) => return Err(format!("row error: {:?}", e)),
+            }
+        }
+        drop(stmt);
+        drop(conn_guard);
+        Ok(out)
+    }
+
     /// Ensure the member record exists and update nickname/group_nickname.
     /// Returns the `id` of the bot_group_member on success or a ServiceResponse error.
     pub fn upsert_member(&self, group_member: &GroupMember) -> Result<i64, ServiceResponse> {

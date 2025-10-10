@@ -1,0 +1,18 @@
+/* Simple mobile-first styles */
+html,body{height:100%;margin:0;font-family:system-ui,Segoe UI,Roboto,"Helvetica Neue",Arial}
+#app{display:flex;flex-direction:column;min-height:100vh;padding:12px;box-sizing:border-box}
+header{display:flex;justify-content:space-between;align-items:center}
+#date{font-size:18px;font-weight:600}
+#nav button{padding:8px 12px;margin-left:6px}
+#records{flex:1;margin-top:12px}
+#records ul{list-style:none;padding:0;margin:0}
+#records li{padding:8px;border-bottom:1px solid #eee}
+footer{padding:12px 0}
+#actions{display:flex;gap:8px}
+#actions button{flex:1;padding:12px;font-size:16px}
+.modal{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.4)}
+.modal.hidden{display:none}
+.panel{background:white;padding:16px;border-radius:8px;min-width:260px}
+input{width:100%;padding:8px;margin:6px 0;border:1px solid #ddd;border-radius:6px}
+button{background:#0078d4;color:white;border:none;border-radius:6px}
+button.secondary{background:#666}

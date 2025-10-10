@@ -225,6 +225,4 @@ pub async fn run(svc: Service) {
     op.update_key_store()
         .save("keystore.json")
         .unwrap_or_else(|e| tracing::error!("Failed to save key store: {:?}", e));
-
-    tokio::signal::ctrl_c().await.unwrap();
 }
