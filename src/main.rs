@@ -1,4 +1,3 @@
-mod api;
 mod handler;
 mod service;
 
@@ -15,7 +14,7 @@ async fn main() {
     tokio::spawn(async move { handler::qbot::run(bot).await });
 
     // build api app and serve via axum::serve
-    let app = api::routes(ctx.clone());
+    let app = handler::api::routes(ctx.clone());
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
     axum::serve(listener, app).await.unwrap();
 }
