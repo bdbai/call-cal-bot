@@ -15,7 +15,9 @@ async fn main() {
     if run_mode.as_deref() != Some("bot") {
         // build api app and serve via axum::serve
         let app = handler::api::routes(ctx.clone());
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:9004").await.unwrap();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:9004")
+            .await
+            .unwrap();
         tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
     }
 

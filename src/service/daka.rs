@@ -99,7 +99,10 @@ impl super::Service {
     /// Query records for a specific checkpoint start (UTC+8 04:00 of the provided date).
     /// If `date_str` is None, uses get_checkpoint() (today by bot rules).
     /// Returns a Vec of (nickname, Option<HH:MM string>) where None means no record.
-    pub fn query_records_for_date(&self, date_str: Option<&str>) -> Result<Vec<(String, Option<String>)>, String> {
+    pub fn query_records_for_date(
+        &self,
+        date_str: Option<&str>,
+    ) -> Result<Vec<(String, Option<String>)>, String> {
         let checkpoint_start = match date_str {
             Some(s) => match chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d") {
                 Ok(d) => BOT_TZ
@@ -131,7 +134,8 @@ impl super::Service {
                     let nickname: String = row.get(0)?;
                     // read as UTC datetime and convert to BOT_TZ when present
                     let created_at: Option<chrono::DateTime<chrono::Utc>> = row.get(1)?;
-                    let time_str = created_at.map(|dt| dt.with_timezone(&BOT_TZ).format("%H:%M").to_string());
+                    let time_str =
+                        created_at.map(|dt| dt.with_timezone(&BOT_TZ).format("%H:%M").to_string());
                     Ok((nickname, time_str))
                 },
             )
