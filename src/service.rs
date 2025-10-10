@@ -1,4 +1,5 @@
-mod daka;
+pub mod daka;
+pub mod models;
 
 use std::sync::{Arc, Mutex};
 

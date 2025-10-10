@@ -7,11 +7,21 @@ use mania::message::builder::MessageChainBuilder;
 use mania::message::chain::{GroupMessageUniqueElem, MessageChain, MessageType};
 use mania::message::entity::{Entity, Mention};
 use mania::{Client, ClientConfig, DeviceInfo, KeyStore};
-use tracing::{debug, error};
+use tracing::debug;
 
-use crate::service::{BotContext, Service};
+use crate::service::Service;
+use crate::service::models::GroupMember;
 
-fn handle_group_msg(ctx: &mut BotContext<'_>, ev: &GroupMessageEvent) -> Option<MessageChain> {
+fn bot_member_to_group_member(b: &BotGroupMember) -> GroupMember {
+    GroupMember {
+        uid: b.uid.to_string(),
+        uin: b.uin,
+        member_name: b.member_name.clone(),
+        member_card: b.member_card.clone(),
+    }
+}
+
+fn handle_group_msg(svc: &Service, ev: &GroupMessageEvent) -> Option<MessageChain> {
     let MessageType::Group(GroupMessageUniqueElem {
         group_uin,
         group_member_info: Some(group_member_info),
@@ -33,15 +43,88 @@ fn handle_group_msg(ctx: &mut BotContext<'_>, ev: &GroupMessageEvent) -> Option<
         .next()
         .unwrap_or_default();
     let (command, args) = first_text.split_once(' ').unwrap_or((first_text, ""));
+
+    let gm = bot_member_to_group_member(group_member_info);
     match command {
-        "/打卡" => handle_打卡(ctx, *group_uin, group_member_info, args),
-        "/我没打卡" => handle_我没打卡(ctx, *group_uin, group_member_info, args),
+        "/打卡" => {
+            debug!("Handling 我没打卡 command for user {}", gm.uin);
+            match svc.upsert_member(&gm) {
+                Ok(user_id) => {
+                    let res = svc.handle_打卡(user_id, args);
+                    tracing::debug!("Service handle_打卡 ok={} message={}", res.ok, res.message);
+                    let mut chain = MessageChainBuilder::group(*group_uin)
+                        .text(" ")
+                        .text(&res.message)
+                        .build();
+                    chain.entities.insert(
+                        0,
+                        Entity::Mention(Mention {
+                            uid: gm.uid.clone().into(),
+                            name: Some(format!("@{}", gm.group_nickname())),
+                            uin: gm.uin,
+                        }),
+                    );
+                    Some(chain)
+                }
+                Err(e) => {
+                    tracing::error!("Failed to upsert member: {:?}", e);
+                    Some(
+                        MessageChainBuilder::group(*group_uin)
+                            .text(&e.message)
+                            .build(),
+                    )
+                }
+            }
+        }
+        "/我没打卡" => {
+            debug!("Handling 我没打卡 command for user {}", gm.uin);
+            match svc.upsert_member(&gm) {
+                Ok(user_id) => {
+                    let res = svc.handle_我没打卡(user_id, args);
+                    tracing::debug!(
+                        "Service handle_我没打卡 ok={} message={}",
+                        res.ok,
+                        res.message
+                    );
+                    let mut chain = MessageChainBuilder::group(*group_uin)
+                        .text(" ")
+                        .text(&res.message)
+                        .build();
+                    chain.entities.insert(
+                        0,
+                        Entity::Mention(Mention {
+                            uid: gm.uid.clone().into(),
+                            name: Some(format!("@{}", gm.group_nickname())),
+                            uin: gm.uin,
+                        }),
+                    );
+                    Some(chain)
+                }
+                Err(e) => {
+                    tracing::error!("Failed to upsert member: {:?}", e);
+                    Some(
+                        MessageChainBuilder::group(*group_uin)
+                            .text(&e.message)
+                            .build(),
+                    )
+                }
+            }
+        }
         "/今日" => {
-            let report = build_daily_report(ctx);
+            let report = svc.build_daily_report();
             Some(MessageChainBuilder::group(*group_uin).text(&report).build())
         }
-        "/咕" => handle_咕(ctx, *group_uin, group_member_info, args),
-        _ => return None,
+        "/咕" => {
+            let res = svc.handle_咕(*group_uin, &gm, args);
+            tracing::debug!("Service handle_咕 ok={} message={}", res.ok, res.message);
+            Some(
+                MessageChainBuilder::group(*group_uin)
+                    .text(" ")
+                    .text(&res.message)
+                    .build(),
+            )
+        }
+        _ => None,
     }
 }
 
@@ -83,7 +166,7 @@ pub async fn run(svc: Service) {
                         match ge {
                             GroupEvent::GroupMessage(gme) => {
                                 if let mania::message::chain::MessageType::Group(_gmeu) = &gme.chain.typ {
-                                    reply = handle_group_msg(&mut svc, gme);
+                                    reply = handle_group_msg(&svc, gme);
                                 }
                             }
                             _ => {},

@@ -1,3 +1,4 @@
+use crate::service::models::{GroupMember, ServiceResponse};
 use chrono::prelude::*;
 use rusqlite::params;
 use tracing::{debug, error};
@@ -95,21 +96,13 @@ impl super::Service {
         )
     }
 
-    pub fn handle_我没打卡(
-        &self,
-        group_uin: u32,
-        group_member_info: &BotGroupMember,
-        _args: &str,
-    ) -> Option<MessageChain> {
-        let uin = group_member_info.uin;
-        let uid = &*group_member_info.uid;
-        let nickname = group_member_info.member_name.as_deref().unwrap_or_default();
-        let group_nickname = group_member_info.member_card.as_deref().unwrap_or(nickname);
+    /// Ensure the member record exists and update nickname/group_nickname.
+    /// Returns the `id` of the bot_group_member on success or a ServiceResponse error.
+    pub fn upsert_member(&self, group_member: &GroupMember) -> Result<i64, ServiceResponse> {
+        let uid = &group_member.uid;
+        let nickname = group_member.member_name.as_deref().unwrap_or_default();
+        let group_nickname = group_member.member_card.as_deref().unwrap_or(nickname);
 
-        debug!("Handling 我没打卡 command for user {}", uin);
-        let checkpoint = get_checkpoint();
-
-        // TODO: refactor
         const UPSERT_RECORD_SQL: &str =
             "INSERT INTO `bot_group_member` (`qq_uid`, `qq_uin`, `nickname`, `group_nickname`)
             VALUES (?1, ?2, ?3, ?4)
@@ -117,26 +110,37 @@ impl super::Service {
                 DO UPDATE SET `nickname` = excluded.nickname, `group_nickname` = excluded.group_nickname
             RETURNING `id`";
 
-        // lock conn for DB ops
-        let mut conn_guard = self.conn.lock().unwrap();
-        let mut update_member_name_stmt = conn_guard
-            .prepare_cached(UPSERT_RECORD_SQL)
-            .expect("Prepare statement failed");
-        let user_id: i64 = match update_member_name_stmt
-            .query_row(params![uid, uin, nickname, group_nickname], |row| {
-                row.get(0)
-            }) {
-            Ok(id) => id,
+        let conn_guard = self.conn.lock().unwrap();
+        let mut stmt = match conn_guard.prepare_cached(UPSERT_RECORD_SQL) {
+            Ok(s) => s,
             Err(e) => {
-                error!("Failed to update member name: {:?}", e);
-                return Some(
-                    MessageChainBuilder::group(group_uin)
-                        .text("打卡失败：无法更新用户信息")
-                        .build(),
-                );
+                return Err(ServiceResponse::err(format!(
+                    "Prepare statement failed: {:?}",
+                    e
+                )));
             }
         };
-        drop(update_member_name_stmt);
+        let id: i64 = match stmt.query_row(
+            params![uid, group_member.uin, nickname, group_nickname],
+            |row| row.get(0),
+        ) {
+            Ok(id) => id,
+            Err(e) => {
+                return Err(ServiceResponse::err(format!(
+                    "Failed to update member name: {:?}",
+                    e
+                )));
+            }
+        };
+        drop(stmt);
+        drop(conn_guard);
+        Ok(id)
+    }
+
+    pub fn handle_我没打卡(&self, user_id: i64, _args: &str) -> ServiceResponse {
+        let checkpoint = get_checkpoint();
+
+        let conn_guard = self.conn.lock().unwrap();
 
         let mut 我没打卡_stmt = conn_guard
             .prepare_cached("DELETE FROM `bot_daka` WHERE `user_id` = ?1 AND `created_at` >= ?2")
@@ -146,69 +150,21 @@ impl super::Service {
         drop(我没打卡_stmt);
         drop(conn_guard);
         let msg = match res {
-            Ok(0) => "确实",
-            Ok(_) => "行吧",
+            Ok(0) => ServiceResponse::ok("确实"),
+            Ok(_) => ServiceResponse::ok("行吧"),
             Err(e) => {
                 tracing::error!("Failed to insert record: {:?}", e);
-                "我没打卡失败：数据库错误"
+                ServiceResponse::err("我没打卡失败：数据库错误")
             }
         };
 
-        let mut reply_chain = MessageChainBuilder::group(group_uin);
-        reply_chain.text(" ").text(msg);
-        let mut chain = reply_chain.build();
-        chain.entities.insert(
-            0,
-            Entity::Mention(Mention {
-                uid: uid.into(),
-                name: Some(format!("@{group_nickname}")),
-                uin,
-            }),
-        );
-        Some(chain)
+        msg
     }
 
-    pub fn handle_打卡(
-        &self,
-        group_uin: u32,
-        group_member_info: &BotGroupMember,
-        _args: &str,
-    ) -> Option<MessageChain> {
-        let uin = group_member_info.uin;
-        let uid = &*group_member_info.uid;
-        let nickname = group_member_info.member_name.as_deref().unwrap_or_default();
-        let group_nickname = group_member_info.member_card.as_deref().unwrap_or(nickname);
-
-        debug!("Handling 打卡 command for user {}", uin);
+    pub fn handle_打卡(&self, user_id: i64, _args: &str) -> ServiceResponse {
         let checkpoint = get_checkpoint();
 
-        const UPSERT_RECORD_SQL: &str =
-            "INSERT INTO `bot_group_member` (`qq_uid`, `qq_uin`, `nickname`, `group_nickname`)
-            VALUES (?1, ?2, ?3, ?4)
-            ON CONFLICT (`qq_uid`)
-                DO UPDATE SET `nickname` = excluded.nickname, `group_nickname` = excluded.group_nickname
-            RETURNING `id`";
-
-        // Lock connection and perform DB ops; drop lock before calling build_daily_report
-        let mut conn_guard = self.conn.lock().unwrap();
-        let mut update_member_name_stmt = conn_guard
-            .prepare_cached(UPSERT_RECORD_SQL)
-            .expect("Prepare statement failed");
-        let user_id: i64 = match update_member_name_stmt
-            .query_row(params![uid, uin, nickname, group_nickname], |row| {
-                row.get(0)
-            }) {
-            Ok(id) => id,
-            Err(e) => {
-                error!("Failed to update member name: {:?}", e);
-                return Some(
-                    MessageChainBuilder::group(group_uin)
-                        .text("打卡失败：无法更新用户信息")
-                        .build(),
-                );
-            }
-        };
-        drop(update_member_name_stmt);
+        let conn_guard = self.conn.lock().unwrap();
 
         let mut 打卡_stmt = conn_guard
             .prepare_cached(
@@ -224,44 +180,33 @@ impl super::Service {
 
         let mut _daily_report = String::new();
         let msg = match res {
-            Ok(0) => "您今天已经打过卡莉",
+            Ok(0) => ServiceResponse::ok("您今天已经打过卡莉"),
             Ok(_) => {
                 _daily_report = self.build_daily_report();
-                &_daily_report
+                ServiceResponse::ok(_daily_report.clone())
             }
             Err(e) => {
                 tracing::error!("Failed to insert record: {:?}", e);
-                "打卡失败：数据库错误"
+                ServiceResponse::err("打卡失败：数据库错误")
             }
         };
 
-        let mut reply_chain = MessageChainBuilder::group(group_uin);
-        reply_chain.text(" ").text(msg);
-        let mut chain = reply_chain.build();
-        chain.entities.insert(
-            0,
-            Entity::Mention(Mention {
-                uid: uid.into(),
-                name: Some(format!("@{group_nickname}")),
-                uin,
-            }),
-        );
-        Some(chain)
+        msg
     }
 
     pub fn handle_咕(
         &self,
-        group_uin: u32,
-        group_member_info: &BotGroupMember,
+        _group_uin: u32,
+        _group_member: &GroupMember,
         _args: &str,
-    ) -> Option<MessageChain> {
-        let uin = group_member_info.uin;
+    ) -> ServiceResponse {
+        let uin = _group_member.uin;
 
         debug!("Handling 咕 command for user {}", uin);
         let checkpoint_end = get_checkpoint();
         let checkpoint_start = checkpoint_end - chrono::Duration::days(10);
 
-        let mut conn_guard = self.conn.lock().unwrap();
+        let conn_guard = self.conn.lock().unwrap();
         let mut get_records_10day_stmt = conn_guard
             .prepare_cached(
                 "SELECT
@@ -302,11 +247,7 @@ impl super::Service {
             Ok(rows) => rows,
             Err(e) => {
                 error!("Failed to query records: {:?}", e);
-                return Some(
-                    MessageChainBuilder::group(group_uin)
-                        .text("咕咕查询失败：数据库错误")
-                        .build(),
-                );
+                return ServiceResponse::err("咕咕查询失败：数据库错误");
             }
         };
 
@@ -341,15 +282,11 @@ impl super::Service {
         };
 
         let msg = if failed_msg.is_empty() && warning_msg.is_empty() {
-            "没有人咕咕".to_string()
+            ServiceResponse::ok("没有人咕咕".to_string())
         } else {
-            format!("{}\n{}", failed_msg, warning_msg)
+            ServiceResponse::ok(format!("{}\n{}", failed_msg, warning_msg))
         };
 
-        let chain = MessageChainBuilder::group(group_uin)
-            .text(" ")
-            .text(msg.trim())
-            .build();
-        Some(chain)
+        msg
     }
 }
