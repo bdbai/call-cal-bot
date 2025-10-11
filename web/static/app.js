@@ -5,7 +5,11 @@ const API = {
     try{
       let r = await fetch(path, opts);
       if(r.status===401||r.status===403){
-        throw {unauth:true};
+        // try to read any message body and include it so frontend can show a popup
+        let txt = await r.text();
+        let parsed;
+        try{ parsed = JSON.parse(txt); }catch(e){ parsed = txt; }
+        throw {unauth:true, message: parsed};
       }
       let txt = await r.text();
       try{ return JSON.parse(txt); }catch(e){ return txt; }
@@ -77,8 +81,10 @@ async function loadRecords(){
     const nextBtn = document.getElementById('next');
     if(formatDate(today) === formatDate(state.date)){
       nextBtn.setAttribute('disabled','disabled');
+      nextBtn.classList.add('today');
     }else{
       nextBtn.removeAttribute('disabled');
+      nextBtn.classList.remove('today');
     }
 
   // show/hide action buttons depending on whether viewing today
@@ -87,6 +93,15 @@ async function loadRecords(){
   const undoBtn = document.getElementById('undo');
   if(isToday){ dakaBtn.style.display = ''; undoBtn.style.display = ''; }
   else { dakaBtn.style.display = 'none'; undoBtn.style.display = 'none'; }
+  // hide entire footer when not today
+  const footerEl = document.querySelector('footer');
+  if(isToday){
+    document.body.classList.remove('footer-hidden');
+    if(footerEl) footerEl.style.display = '';
+  } else {
+    document.body.classList.add('footer-hidden');
+    if(footerEl) footerEl.style.display = 'none';
+  }
   }catch(e){
     if(e.unauth){ showAuth(); return; }
     console.error(e); alert('load failed');
@@ -119,8 +134,19 @@ async function doLogin(){
     if(res && res.need_reset){ showReset(); hideAuth(); return; }
     hideAuth();
     await loadRecords();
-  }catch(e){ if(e.unauth){ showAuth(); } else { alert('login failed'); } }
+  }catch(e){
+    if(e.unauth){
+      // if the thrown object includes a message from server, show it
+      if(e.message){
+        try{ const m = (typeof e.message === 'string') ? e.message : JSON.stringify(e.message); alert(m); }catch(_){ alert('unauthorized'); }
+      }
+      showAuth();
+    } else { alert('login failed'); }
+  }
 }
+
+
+
 
 async function doSetPassword(){
   const newpass = document.getElementById('newpass').value;

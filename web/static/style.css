@@ -1,14 +1,76 @@
 /* Simple mobile-first styles */
 html,body{height:100%;margin:0;font-family:system-ui,Segoe UI,Roboto,"Helvetica Neue",Arial}
-#app{display:flex;flex-direction:column;min-height:100vh;padding:12px;box-sizing:border-box}
+/* reserve a footer height variable so we can keep content above the sticky actions */
+:root {
+    --footer-height: 72px
+}
+
+:root {
+    --footer-height: 72px;
+    --header-height: 56px
+}
+
+#app {
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+    padding: 12px;
+    box-sizing: border-box;
+    padding-bottom: calc(var(--footer-height) + env(safe-area-inset-bottom, 12px));
+    padding-top: calc(var(--header-height) + env(safe-area-inset-top, 12px));
+}
+
+/* when footer is hidden, reduce bottom padding so layout is not overly spaced */
+body.footer-hidden #app {
+    padding-bottom: 12px
+}
 header{display:flex;justify-content:space-between;align-items:center}
+/* sticky header at top, respects safe-area inset */
+header {
+    position: fixed;
+    left: 0;
+    right: 0;
+    top: env(safe-area-inset-top, 12px);
+    height: var(--header-height);
+    padding: 8px 12px;
+    box-sizing: border-box;
+    background: rgba(255, 255, 255, 0.98);
+    z-index: 40;
+    border-bottom: 1px solid #eee
+}
 #date{font-size:18px;font-weight:600}
 #nav button{padding:8px 12px;margin-left:6px}
+/* visual indicator for next button when it points to 'today' */
+#nav button.today {
+    background: lightsteelblue;
+}
 #records{flex:1;margin-top:12px}
 #records ul{list-style:none;padding:0;margin:0}
 #records li{padding:8px;border-bottom:1px solid #eee}
-footer{padding:12px 0}
-#actions{display:flex;gap:8px}
+/* sticky footer for action buttons - stays above device multitask area using safe-area-inset-bottom */
+footer {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: env(safe-area-inset-bottom, 12px);
+    height: var(--footer-height);
+    display: flex;
+    align-items: center;
+    padding: 12px;
+    box-sizing: border-box;
+    background: rgba(255, 255, 255, 0.98);
+    box-shadow: 0 -6px 16px rgba(0, 0, 0, 0.06);
+}
+
+body.footer-hidden footer {
+    display: none
+}
+
+#actions {
+    display: flex;
+    gap: 8px;
+    width: 100%
+}
 #actions button{flex:1;padding:12px;font-size:16px}
 .modal{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.4)}
 .modal.hidden{display:none}

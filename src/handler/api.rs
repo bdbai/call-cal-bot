@@ -239,9 +239,11 @@ async fn login_handler(
                     {
                         match issue_jwt(member_id) {
                             Ok(token) => {
-                                // set HttpOnly cookie
-                                let cookie =
-                                    format!("auth_token={}; HttpOnly; Path=/; SameSite=Lax", token);
+                                // set HttpOnly cookie with Max-Age matching JWT expiry (180 days)
+                                let cookie = format!(
+                                    "auth_token={}; HttpOnly; Path=/; Max-Age=15552000; SameSite=Lax",
+                                    token
+                                );
                                 let body = Json(serde_json::json!({"ok": true}));
                                 return (StatusCode::OK, [("Set-Cookie", cookie)], body)
                                     .into_response();
