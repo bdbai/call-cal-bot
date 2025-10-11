@@ -72,7 +72,7 @@ async function loadRecords(){
       const li = document.createElement('li'); li.textContent = JSON.stringify(res); list.appendChild(li);
     }
 
-    // popup any backend message (e.g., res.message or res.error)
+  // popup any backend message (e.g., res.message or res.error)
     if(res && res.message){ alert(res.message); }
     if(res && res.error){ alert(res.error); }
 
@@ -102,11 +102,50 @@ async function loadRecords(){
     document.body.classList.add('footer-hidden');
     if(footerEl) footerEl.style.display = 'none';
   }
+  // check gu button state after loading records
+  checkAndShowGuButton();
   }catch(e){
     if(e.unauth){ showAuth(); return; }
     console.error(e); alert('load failed');
   }
 }
+
+// 咕 button logic: visible only on today and when either array is non-empty
+async function checkAndShowGuButton(){
+  const guBtn = document.getElementById('gu');
+  const today = getCheckpointDateFor(new Date());
+  const isToday = (formatDate(today) === formatDate(state.date));
+  if(!isToday){ guBtn.style.display = 'none'; return; }
+  try{
+    const res = await API.call('/daka/gu');
+    const hasAny = (Array.isArray(res.missed_10) && res.missed_10.length>0) || (Array.isArray(res.warning_7) && res.warning_7.length>0);
+    if(hasAny){ guBtn.style.display = ''; } else { guBtn.style.display = 'none'; }
+    // store last fetched results for modal
+    guBtn._last = res;
+  }catch(e){ if(e.unauth){ guBtn.classList.add('hidden'); } else { console.error('gu fetch failed', e); guBtn.classList.add('hidden'); } }
+}
+
+function showGuModal(){
+  const guBtn = document.getElementById('gu');
+  const res = guBtn._last || { missed_10: [], warning_7: [] };
+  const missList = document.getElementById('gu-missed-list');
+  const warnList = document.getElementById('gu-warning-list');
+  missList.innerHTML = '';
+  warnList.innerHTML = '';
+  const missed = (res.missed_10 || []);
+  const warning = (res.warning_7 || []);
+  if(missed.length>0){
+    document.getElementById('gu-missed').style.display = '';
+    missed.forEach(n => { const li = document.createElement('li'); li.textContent = n; missList.appendChild(li); });
+  } else { document.getElementById('gu-missed').style.display = 'none'; }
+  if(warning.length>0){
+    document.getElementById('gu-warning').style.display = '';
+    warning.forEach(n => { const li = document.createElement('li'); li.textContent = n; warnList.appendChild(li); });
+  } else { document.getElementById('gu-warning').style.display = 'none'; }
+  document.getElementById('gu-modal').classList.remove('hidden');
+}
+
+function hideGuModal(){ document.getElementById('gu-modal').classList.add('hidden'); }
 
 async function doAction(type){
   // type: 'daka' or 'undo'
@@ -162,9 +201,12 @@ async function doSetPassword(){
 window.addEventListener('load', ()=>{
   document.getElementById('prev').addEventListener('click', ()=>{ state.date.setDate(state.date.getDate()-1); loadRecords(); });
   document.getElementById('next').addEventListener('click', ()=>{ state.date.setDate(state.date.getDate()+1); loadRecords(); });
+  document.getElementById('gu').addEventListener('click', showGuModal);
   document.getElementById('daka').addEventListener('click', ()=>doAction('daka'));
   document.getElementById('undo').addEventListener('click', ()=>doAction('undo'));
   document.getElementById('login').addEventListener('click', doLogin);
   document.getElementById('setpass').addEventListener('click', doSetPassword);
+  document.getElementById('gu-close').addEventListener('click', hideGuModal);
   loadRecords();
+  checkAndShowGuButton();
 });

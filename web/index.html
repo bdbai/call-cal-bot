@@ -11,6 +11,7 @@
     <header>
       <div id="date">--</div>
       <div id="nav">
+        <button id="gu" style="display:none">咕</button>
         <button id="prev">◀</button>
         <button id="next">▶</button>
       </div>
@@ -34,6 +35,23 @@
       <input id="uin" placeholder="QQ UIN" type="number" />
       <input id="password" placeholder="Password" type="password" />
       <button id="login">登录</button>
+    </div>
+  </div>
+
+  <div id="gu-modal" class="modal hidden">
+    <div class="panel">
+      <h3>是谁咕了</h3>
+      <div id="gu-content">
+        <div id="gu-missed">
+          <h4>💢 10天没打卡</h4>
+          <ul id="gu-missed-list"></ul>
+        </div>
+        <div id="gu-warning">
+          <h4>⚠️ 7天没打卡</h4>
+          <ul id="gu-warning-list"></ul>
+        </div>
+      </div>
+      <button id="gu-close">关闭</button>
     </div>
   </div>
 

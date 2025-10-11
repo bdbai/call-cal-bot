@@ -72,6 +72,7 @@ pub fn routes(svc: Service) -> Router {
         .route("/", get(index_handler))
         .route("/static/{*file}", get(static_handler))
         .route("/daka/records", get(daka_records_handler))
+        .route("/daka/gu", get(daka_gu_handler))
         .route("/daka/daka", post(daka_create_handler))
         .route("/daka/daka", delete(daka_delete_handler))
         .with_state(svc)
@@ -127,6 +128,29 @@ async fn daka_records_handler(
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(serde_json::json!({"error": e, "message": "failed to get records"})),
+        )
+            .into_response(),
+    }
+}
+
+async fn daka_gu_handler(State(svc): State<Service>, headers: HeaderMap) -> impl IntoResponse {
+    let token = match extract_token_from_cookies(&headers) {
+        Ok(t) => t,
+        Err(e) => return e.into_response(),
+    };
+    if verify_jwt(&token).is_err() {
+        return (StatusCode::UNAUTHORIZED, "invalid token").into_response();
+    }
+
+    match svc.query_missed_and_warning() {
+        Ok((missed, warn)) => (
+            StatusCode::OK,
+            Json(serde_json::json!({"missed_10": missed, "warning_7": warn})),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": e})),
         )
             .into_response(),
     }

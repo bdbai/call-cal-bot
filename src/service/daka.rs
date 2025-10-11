@@ -1,7 +1,7 @@
 use crate::service::models::{GroupMember, ServiceResponse};
 use chrono::prelude::*;
 use rusqlite::params;
-use tracing::{debug, error};
+use tracing::error;
 
 const BOT_TZ: FixedOffset = FixedOffset::east_opt(8 * 3600).expect("UTC+8 offset");
 const BOT_CHECKPOINT: NaiveTime =
@@ -257,9 +257,34 @@ impl super::Service {
         _group_member: &GroupMember,
         _args: &str,
     ) -> ServiceResponse {
-        let uin = _group_member.uin;
+        // reuse the query logic to obtain lists and format the message
+        match self.query_missed_and_warning() {
+            Ok((missed, warn)) => {
+                if missed.is_empty() && warn.is_empty() {
+                    ServiceResponse::ok("没有人咕咕".to_string())
+                } else {
+                    let failed_msg = if missed.is_empty() {
+                        "".to_string()
+                    } else {
+                        format!("💢 10天没打卡：\n{}", missed.join("\u{3000}"))
+                    };
+                    let warning_msg = if warn.is_empty() {
+                        "".to_string()
+                    } else {
+                        format!("⚠️ 7天没打卡：\n{}", warn.join("\u{3000}"))
+                    };
+                    ServiceResponse::ok(format!("{}\n{}", failed_msg, warning_msg))
+                }
+            }
+            Err(e) => {
+                error!("Failed to query records for 咕: {:?}", e);
+                ServiceResponse::err("咕咕查询失败：数据库错误")
+            }
+        }
+    }
 
-        debug!("Handling 咕 command for user {}", uin);
+    /// Return two lists: missed in last 10 days (never daka in window) and warning list (last daka older than 7 days)
+    pub fn query_missed_and_warning(&self) -> Result<(Vec<String>, Vec<String>), String> {
         let checkpoint_end = get_checkpoint();
         let checkpoint_start = checkpoint_end - chrono::Duration::days(10);
 
@@ -277,7 +302,7 @@ impl super::Service {
             FROM `bot_group_member`
             ORDER BY `bot_group_member`.`sort_key` ASC, `bot_group_member`.`id` ASC",
             )
-            .expect("Prepare statement failed");
+            .map_err(|e| format!("prepare failed: {:?}", e))?;
 
         #[derive(Debug, Clone)]
         struct DakaRecord {
@@ -296,19 +321,12 @@ impl super::Service {
                     })
                 },
             )
-            .and_then(|rows| rows.collect::<Result<Vec<_>, _>>());
+            .and_then(|rows| rows.collect::<Result<Vec<_>, _>>())
+            .map_err(|e| format!("query failed: {:?}", e))?;
         drop(get_records_10day_stmt);
         drop(conn_guard);
 
-        let records = match res {
-            Ok(rows) => rows,
-            Err(e) => {
-                error!("Failed to query records: {:?}", e);
-                return ServiceResponse::err("咕咕查询失败：数据库错误");
-            }
-        };
-
-        let failed_group_members = records
+        let failed_group_members = res
             .iter()
             .filter(|record| {
                 if let Some(last_daka_at) = record.last_daka_at {
@@ -317,33 +335,17 @@ impl super::Service {
                     true
                 }
             })
-            .map(|record| &*record.group_nickname)
+            .map(|record| record.group_nickname.clone())
             .collect::<Vec<_>>();
-        let failed_msg = if failed_group_members.is_empty() {
-            "".into()
-        } else {
-            format!("💢 10天没打卡：\n{}", failed_group_members.join("\u{3000}"))
-        };
 
         let warning_checkpoint = checkpoint_end - chrono::Duration::days(7);
-        let warning_group_members = records
+        let warning_group_members = res
             .iter()
             .filter_map(|record| {
-                (record.last_daka_at? < warning_checkpoint).then_some(&*record.group_nickname)
+                (record.last_daka_at? < warning_checkpoint).then_some(record.group_nickname.clone())
             })
             .collect::<Vec<_>>();
-        let warning_msg = if warning_group_members.is_empty() {
-            "".into()
-        } else {
-            format!("⚠️ 7天没打卡：\n{}", warning_group_members.join("\u{3000}"))
-        };
 
-        let msg = if failed_msg.is_empty() && warning_msg.is_empty() {
-            ServiceResponse::ok("没有人咕咕".to_string())
-        } else {
-            ServiceResponse::ok(format!("{}\n{}", failed_msg, warning_msg))
-        };
-
-        msg
+        Ok((failed_group_members, warning_group_members))
     }
 }
