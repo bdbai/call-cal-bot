@@ -213,13 +213,14 @@ pub async fn run(svc: Service) {
         tracing::info!("Session is still valid, trying to online...");
     }
 
-    let _tx = match op.online().await {
+    let online_handle = match op.online().await {
         Ok(tx) => tx,
         Err(e) => {
             tracing::error!("Failed to set online status: {e:?}");
             return;
         }
     };
+    std::mem::forget(online_handle);
     tracing::info!("Bot online");
 
     op.update_key_store()

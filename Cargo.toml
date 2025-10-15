@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-mania = { git = "https://github.com/LagrangeDev/mania.git", rev = "53e402fa910b33a09a556907b008af52db9b9718" }
+mania = { git = "https://github.com/LagrangeDev/mania.git", rev = "60f3c8f368028aeb830c70226ae40976a2b0153b" }
 thiserror = "2"
 # reqwest = { version = "0.12", features = ["json", "native-tls-alpn"] }
 futures = { version = "0.3", default-features = false, features = [
